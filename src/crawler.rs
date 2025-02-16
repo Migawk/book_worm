@@ -1,6 +1,12 @@
-use crate::db::{DbFileWithoutContent, Dir};
+use crate::db::Dir;
 use std::fs;
 
+#[derive(Debug)]
+pub struct DbFileWithoutContent {
+    pub file_name: String,
+    pub file_type: String,
+    pub path: String,
+}
 fn get_type(file_name: String) -> String {
     let collection: Vec<&str> = file_name.split(".").collect();
     let idx = collection.len() - 1;
