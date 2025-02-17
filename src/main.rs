@@ -34,7 +34,7 @@ fn main() {
     } else {
         println!(
             "Usage:
-        cmd <action> [param1 param2 ...]
+        book_worm <action> [param1 param2 ...]
         "
         );
     }
