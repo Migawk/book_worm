@@ -21,6 +21,14 @@ pub struct Db {
     files: i64,
     dirs: i16,
 }
+
+pub struct Result {
+    file_name: String,
+    word: String,
+    idx: f64,
+    lensh: f64,
+    jer: f64,
+}
 impl Db {
     pub fn new() -> Self {
         let connection = sqlite::open("database.db").unwrap();
@@ -63,24 +71,6 @@ impl Db {
         stat.bind((3, path)).unwrap();
         stat.bind((4, content)).unwrap();
         stat.next().expect("Err during inserting file");
-
-        // let mut file_name = String::new();
-        // let mut file_type = String::new();
-        // let mut path = String::new();
-        // let mut content = String::new();
-
-        // for r in stat.into_iter().map(|r| r.unwrap()) {
-        //     file_name.push_str(r.read::<&str, _>("file_name"));
-        //     file_type.push_str(r.read::<&str, _>("file_type"));
-        //     path.push_str(r.read::<&str, _>("path"));
-        //     content.push_str(r.read::<&str, _>("content"));
-        // }
-        // DbFile {
-        //     file_name,
-        //     file_type,
-        //     path,
-        //     content,
-        // }
     }
     pub fn get_file(&self, file_name: &str) -> DbFile {
         let stat = self
@@ -177,9 +167,9 @@ impl Db {
 
         self
     }
-    pub fn search(&self, searching: &str) -> Vec<(String, String, usize, f64, f64)> {
+    pub fn search(&self, searching: &str) -> Vec<Result> {
         let files = self.get_files(self.files, 0);
-        let mut resp: Vec<(String, String, usize, f64, f64)> = vec![];
+        let mut resp: Vec<Result> = vec![];
 
         for f_name in files {
             let file = self.get_file(&f_name.as_str());
@@ -192,14 +182,20 @@ impl Db {
                 let lensh = normalized_levenshtein(word.as_str(), searching) * 100.0;
 
                 if lensh > 60.0 && jer > 60.0 {
-                    resp.push((f_name.clone(), word, idx, lensh, jer));
+                    resp.push(Result {
+                        file_name: f_name.clone(),
+                        word,
+                        idx: idx as f64,
+                        lensh,
+                        jer,
+                    });
                 }
             }
         }
 
         resp.sort_by(|a, b| {
-            ((100.0 - a.3).abs() + (100.0 - a.4).abs())
-                .total_cmp(&((100.0 - b.3).abs() + (100.0 - b.4).abs()))
+            ((100.0 - a.lensh).abs() + (100.0 - a.jer).abs())
+                .total_cmp(&((100.0 - b.lensh).abs() + (100.0 - b.jer).abs()))
         });
         resp
     }
