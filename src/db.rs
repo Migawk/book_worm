@@ -19,8 +19,8 @@ pub struct DbFile {
 
 pub struct Db {
     pool: Connection,
-    files: i64,
-    dirs: i16,
+    pub files: i64,
+    pub dirs: i16,
 }
 
 #[derive(Debug, Clone)]

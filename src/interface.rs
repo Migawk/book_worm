@@ -76,13 +76,19 @@ impl App {
     pub fn view(&self) -> Element<Message> {
         let tab = match &self.tab {
             Tab::Scanning => {
+                let data = db::Db::new();
+
                 column![
                     text("Scan the path to library"),
                     row![
                         text_input("Scan directory", &self.scan).on_input(Message::ScanStr),
-                        button("Scan").on_press(Message::Scan)
+                        button("Scan").on_press(Message::Scan),
                     ]
-                    .spacing(12)
+                    .spacing(12),
+                    row![
+                        text(format!("Files: {}", data.files)),
+                        text(format!("Folders: {}", data.dirs))
+                    ]
                 ]
             }
             Tab::Searching => {
@@ -97,7 +103,7 @@ impl App {
                 ]
                 .spacing(12);
 
-                for (idx, res) in self.search_result.iter().clone().enumerate() {
+                for res in self.search_result.iter().clone() {
                     results = results
                         .push(button(res.file_name.as_str()).on_press(Message::Open(res.clone())));
                 }
