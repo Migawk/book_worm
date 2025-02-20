@@ -16,18 +16,26 @@ pub struct DbFile {
     pub path: String,
     pub content: String,
 }
+
 pub struct Db {
     pool: Connection,
     files: i64,
     dirs: i16,
 }
 
-pub struct Result {
-    file_name: String,
-    word: String,
-    idx: f64,
-    lensh: f64,
-    jer: f64,
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    pub file_name: String,
+    pub file_path: String,
+    pub word: String,
+    pub idx: f64,
+    pub lensh: f64,
+    pub jer: f64,
+}
+
+pub struct SearchFile {
+    pub file_name: String,
+    pub file_path: String,
 }
 impl Db {
     pub fn new() -> Self {
@@ -99,7 +107,7 @@ impl Db {
             content,
         }
     }
-    pub fn get_files(&self, limit: i64, offset: i64) -> Vec<String> {
+    pub fn get_files(&self, limit: i64, offset: i64) -> Vec<SearchFile> {
         let stat = self
             .pool
             .prepare("SELECT * FROM file LIMIT :lim OFFSET :offs;")
@@ -110,14 +118,18 @@ impl Db {
             .bind((":offs", offset))
             .unwrap();
 
-        let mut names: Vec<String> = vec![];
+        let mut files: Vec<SearchFile> = vec![];
 
         for r in stat.into_iter().map(|r| r.unwrap()) {
-            let dat = r.read::<&str, _>("file_name");
-            names.push(dat.to_string());
+            let file_name = r.read::<&str, _>("file_name");
+            let file_path = r.read::<&str, _>("path");
+            files.push(SearchFile {
+                file_name: file_name.to_string(),
+                file_path: file_path.to_string(),
+            });
         }
 
-        names
+        files
     }
     pub fn insert_dir(&self, dir_name: &str, path: &str) {
         let query = "
@@ -167,12 +179,12 @@ impl Db {
 
         self
     }
-    pub fn search(&self, searching: &str) -> Vec<Result> {
+    pub fn search(&self, searching: &str) -> Vec<SearchResult> {
         let files = self.get_files(self.files, 0);
-        let mut resp: Vec<Result> = vec![];
+        let mut resp: Vec<SearchResult> = vec![];
 
-        for f_name in files {
-            let file = self.get_file(&f_name.as_str());
+        for search_file in files {
+            let file = self.get_file(&search_file.file_name.as_str());
             let words = file.content.split(" ").enumerate();
 
             for (idx, w) in words {
@@ -180,10 +192,11 @@ impl Db {
 
                 let jer = jaro(word.as_str(), searching) * 100.0;
                 let lensh = normalized_levenshtein(word.as_str(), searching) * 100.0;
-
+                
                 if lensh > 60.0 && jer > 60.0 {
-                    resp.push(Result {
-                        file_name: f_name.clone(),
+                    resp.push(SearchResult {
+                        file_name: search_file.file_name.clone(),
+                        file_path: search_file.file_path.clone(),
                         word,
                         idx: idx as f64,
                         lensh,

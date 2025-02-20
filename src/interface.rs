@@ -1,7 +1,9 @@
 use std::process::Command;
 
-use iced::widget::{button, column, row, text, text_input};
+use iced::widget::{button, column, row, scrollable, text, text_input};
 use iced::{Element, Task};
+
+use crate::db::{self, Db, SearchResult};
 
 #[derive(Debug, Clone)]
 pub enum Tab {
@@ -18,7 +20,7 @@ pub struct App {
     pub scan: String,
     pub search: String,
     pub tab: Tab,
-    pub search_result: Vec<String>,
+    pub search_result: Vec<SearchResult>,
 }
 
 #[derive(Debug, Clone)]
@@ -28,14 +30,25 @@ pub enum Message {
     ScanStr(String),
     SearchStr(String),
     SwitchTab(Tab),
-    Open(String),
+    Open(SearchResult),
 }
 
 impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Scan => {}
-            Message::Search => {}
+            Message::Scan => {
+                let conn = db::Db::new();
+                conn.scan(&self.scan);
+            }
+            Message::Search => {
+                let conn = db::Db::new();
+                let results = conn.search(&self.search);
+                self.search_result = vec![];
+
+                for res in results {
+                    self.search_result.push(res);
+                }
+            }
             Message::ScanStr(txt) => {
                 self.scan = txt.clone();
             }
@@ -50,10 +63,9 @@ impl App {
                     self.tab = Tab::Searching;
                 }
             },
-            Message::Open(f_name) => {
-                println!("{f_name}");
+            Message::Open(res) => {
                 Command::new("cmd")
-                    .args(["/C", "start", "", &f_name])
+                    .args(["/C", "start", "", &res.file_path])
                     .output()
                     .expect("Err during opening file");
             }
@@ -74,14 +86,7 @@ impl App {
                 ]
             }
             Tab::Searching => {
-                let mut results = row![].spacing(12);
-
-                for res in &self.search_result {
-                    results =
-                        results.push(button(res.as_str()).on_press(Message::Open(res.to_string())));
-                }
-
-                column![
+                let mut results = column![
                     text("Search"),
                     row![
                         text_input("Search by word or phrase", &self.search)
@@ -89,9 +94,16 @@ impl App {
                         button("Search").on_press(Message::Search)
                     ]
                     .spacing(12),
-                    results
                 ]
-                .spacing(12)
+                .spacing(12);
+
+                for (idx, res) in self.search_result.iter().clone().enumerate() {
+                    results = results
+                        .push(button(res.file_name.as_str()).on_press(Message::Open(res.clone())));
+                }
+
+                column![scrollable(results)]
+                // results
             }
         };
         let content = column![
