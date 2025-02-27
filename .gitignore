@@ -1,3 +1,4 @@
 /target
 /dir
 *.db
+/dict

@@ -1,5 +1,15 @@
+use std::{
+    fs::{self, File, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+};
+
+use iced::futures::io;
+use regex::Regex;
 use sqlite::{Connection, Value};
 use strsim::{jaro, normalized_levenshtein};
+
+use std::env;
 
 use crate::{crawler, docx, pdf};
 use crawler::analyze;
@@ -15,6 +25,7 @@ pub struct DbFile {
     pub file_type: String,
     pub path: String,
     pub content: String,
+    pub id: i64,
 }
 
 pub struct Db {
@@ -83,7 +94,7 @@ impl Db {
     pub fn get_file(&self, file_name: &str) -> DbFile {
         let stat = self
             .pool
-            .prepare("SELECT * FROM file WHERE file_name=?;")
+            .prepare("SELECT *, rowid FROM file WHERE file_name=?;")
             .unwrap()
             .into_iter()
             .bind((1, file_name))
@@ -93,18 +104,21 @@ impl Db {
         let mut file_type = String::new();
         let mut path = String::new();
         let mut content = String::new();
+        let mut id = 0;
 
         for r in stat.into_iter().map(|r| r.unwrap()) {
             file_name.push_str(r.read::<&str, _>("file_name"));
             file_type.push_str(r.read::<&str, _>("file_type"));
             path.push_str(r.read::<&str, _>("path"));
             content.push_str(r.read::<&str, _>("content"));
+            id = r.read::<i64, _>("rowid");
         }
         DbFile {
             file_name,
             file_type,
             path,
             content,
+            id,
         }
     }
     pub fn get_files(&self, limit: i64, offset: i64) -> Vec<SearchFile> {
@@ -159,26 +173,6 @@ impl Db {
             path,
         }
     }
-    pub fn create_virtual_db(&self) -> &Self {
-        self.pool
-            .execute(
-                "
-        CREATE VIRTUAL TABLE IF NOT EXISTS file_v USING fts5(file_name, file_type, path, content);
-        ",
-            )
-            .expect("Err during creating virtual table 'file'");
-
-        self.pool
-            .execute(
-                "
-        INSERT INTO file_v(file_name, file_type, path, content)
-        SELECT file_name, file_type, path, content FROM file
-        ",
-            )
-            .unwrap();
-
-        self
-    }
     pub fn search(&self, searching: &str) -> Vec<SearchResult> {
         let files = self.get_files(self.files, 0);
         let mut resp: Vec<SearchResult> = vec![];
@@ -192,7 +186,7 @@ impl Db {
 
                 let jer = jaro(word.as_str(), searching) * 100.0;
                 let lensh = normalized_levenshtein(word.as_str(), searching) * 100.0;
-                
+
                 if lensh > 60.0 && jer > 60.0 {
                     resp.push(SearchResult {
                         file_name: search_file.file_name.clone(),
@@ -230,8 +224,73 @@ impl Db {
 
             println!("adding FILE: {}", file.file_name);
             self.insert_file(&file.file_name, &file.file_type, &file.path, &content);
+
+            let db_file = self.get_file(&file.file_name);
+            let path = env::current_dir().unwrap();
+            let current_path = Path::new(path.as_os_str()).join("dict");
+            let re = Regex::new(r"^[a-zA-Zа-яА-я]+$").unwrap();
+
+            // create dict if doesnt exist
+            fs::create_dir("dict").ok();
+            for (idx, w) in content.split(" ").filter(|x| re.is_match(x)).enumerate() {
+                self.insert_word(&db_file.id, idx, w, &current_path.as_path());
+            }
         }
 
+        let entries = fs::read_dir("dict")
+            .unwrap()
+            .map(|res| res.map(|e| e.path()))
+            .collect::<Result<Vec<_>, io::Error>>()
+            .unwrap();
+
+        for path in entries {
+            self.sort_file(&path);
+        }
+        //
+
         self
+    }
+    fn write_file_stream(&self, file_path: &PathBuf, append: bool) -> File {
+        if append {
+            let file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(file_path)
+            .unwrap();
+
+        file
+        } else {
+            let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(file_path)
+            .unwrap();
+
+        file
+        }
+    }
+    fn insert_word(&self, file_idx: &i64, idx: usize, word: &str, path: &Path) -> usize {
+        let char = &word.chars().take(1).next().unwrap();
+        let file_path = path.join(char.to_string().as_str());
+
+        let mut file = self.write_file_stream(&file_path, true);
+        let content = format!("{}|{}|{}\n", word, file_idx, idx);
+        file.write(content.as_bytes()).unwrap()
+    }
+    fn sort_file(&self, file_path: &PathBuf) {
+        let raw_buff = fs::read(file_path).unwrap();
+        let parsed_buff = String::from_utf8(raw_buff).unwrap();
+        let content: Vec<&str> = parsed_buff.split("\n").collect();
+        let mut file_content = content.clone();
+        file_content.sort();
+        file_content.sort_by(|a, b| a.len().cmp(&b.len()));
+
+        let mut file = self.write_file_stream(file_path, false);
+
+        for line in file_content {
+            let parsed_txt = format!("{}\n", line);
+            file.write(parsed_txt.as_bytes())
+                .expect("Err during writing the file");
+        }
     }
 }

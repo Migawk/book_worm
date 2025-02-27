@@ -16,5 +16,6 @@ fn main() -> iced::Result {
         tab: Tab::Scanning,
         search_result: vec![],
     };
+
     iced::application("Book Worm", App::update, App::view).run_with(|| (init, Task::none()))
 }
