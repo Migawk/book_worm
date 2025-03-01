@@ -24,6 +24,8 @@ pub fn analyze(path: &str) -> (Vec<Dir>, Vec<DbFileWithoutContent>) {
         let path = ent.path().to_str().unwrap().to_string();
         let is_dir = ent.file_type().unwrap().is_dir();
 
+        println!("Analyze: {}", &path);
+
         if is_dir {
             let dir = Dir {
                 name: file_name,

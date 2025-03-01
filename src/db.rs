@@ -28,26 +28,22 @@ pub struct DbFile {
     pub id: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct DictWord {
+    pub content: String,
+    pub file_idx: i16,
+    pub word_idx: i32,
+    pub similarity: f32,
+    pub file_name: String,
+    pub file_path: String,
+    pub file_content: String,
+}
 pub struct Db {
     pool: Connection,
     pub files: i64,
     pub dirs: i16,
 }
 
-#[derive(Debug, Clone)]
-pub struct SearchResult {
-    pub file_name: String,
-    pub file_path: String,
-    pub word: String,
-    pub idx: f64,
-    pub lensh: f64,
-    pub jer: f64,
-}
-
-pub struct SearchFile {
-    pub file_name: String,
-    pub file_path: String,
-}
 impl Db {
     pub fn new() -> Self {
         let connection = sqlite::open("database.db").unwrap();
@@ -85,11 +81,49 @@ impl Db {
 	INSERT INTO file VALUES(?, ?, ?, ?) RETURNING *;
 	";
         let mut stat = self.pool.prepare(query).unwrap();
+        let re = Regex::new(r"^[a-zA-Zа-яА-я]+$").unwrap();
+        let f_content = content
+            .split(" ")
+            .filter(|x| re.is_match(x))
+            .into_iter()
+            .collect::<Vec<&str>>()
+            .join(" ");
+
         stat.bind((1, file_name)).unwrap();
         stat.bind((2, file_type)).unwrap();
         stat.bind((3, path)).unwrap();
-        stat.bind((4, content)).unwrap();
+        stat.bind((4, f_content.as_str())).unwrap();
         stat.next().expect("Err during inserting file");
+    }
+    pub fn get_file_idx(&self, file_idx: i64) -> DbFile {
+        let stat = self
+            .pool
+            .prepare("SELECT *, rowid FROM file WHERE rowid=?;")
+            .unwrap()
+            .into_iter()
+            .bind((1, file_idx))
+            .unwrap();
+
+        let mut file_name = String::new();
+        let mut file_type = String::new();
+        let mut path = String::new();
+        let mut content = String::new();
+        let mut id = 0;
+
+        for r in stat.into_iter().map(|r| r.unwrap()) {
+            file_name.push_str(r.read::<&str, _>("file_name"));
+            file_type.push_str(r.read::<&str, _>("file_type"));
+            path.push_str(r.read::<&str, _>("path"));
+            content.push_str(r.read::<&str, _>("content"));
+            id = r.read::<i64, _>("rowid");
+        }
+        DbFile {
+            file_name,
+            file_type,
+            path,
+            content,
+            id,
+        }
     }
     pub fn get_file(&self, file_name: &str) -> DbFile {
         let stat = self
@@ -121,30 +155,6 @@ impl Db {
             id,
         }
     }
-    pub fn get_files(&self, limit: i64, offset: i64) -> Vec<SearchFile> {
-        let stat = self
-            .pool
-            .prepare("SELECT * FROM file LIMIT :lim OFFSET :offs;")
-            .unwrap()
-            .into_iter()
-            .bind((":lim", limit))
-            .unwrap()
-            .bind((":offs", offset))
-            .unwrap();
-
-        let mut files: Vec<SearchFile> = vec![];
-
-        for r in stat.into_iter().map(|r| r.unwrap()) {
-            let file_name = r.read::<&str, _>("file_name");
-            let file_path = r.read::<&str, _>("path");
-            files.push(SearchFile {
-                file_name: file_name.to_string(),
-                file_path: file_path.to_string(),
-            });
-        }
-
-        files
-    }
     pub fn insert_dir(&self, dir_name: &str, path: &str) {
         let query = "
 	INSERT INTO dir VALUES(?, ?) RETURNING *;
@@ -153,58 +163,6 @@ impl Db {
         stat.bind((1, dir_name)).unwrap();
         stat.bind((2, path)).unwrap();
         stat.next().expect("Err during inserting file");
-    }
-    pub fn get_dir(&self, file_name: &str) -> Dir {
-        let query = "
-        SELECT * FROM dir WHERE dir_name=?;
-	";
-        let mut stat = self.pool.prepare(query).unwrap();
-        stat.bind((1, file_name)).unwrap();
-        stat.next().expect("Err during obtaining file");
-
-        let mut dir_name = String::new();
-        let mut path = String::new();
-        for r in stat.into_iter().map(|r| r.unwrap()) {
-            dir_name.push_str(r.read::<&str, _>("file_name"));
-            path.push_str(r.read::<&str, _>("path"));
-        }
-        Dir {
-            name: dir_name,
-            path,
-        }
-    }
-    pub fn search(&self, searching: &str) -> Vec<SearchResult> {
-        let files = self.get_files(self.files, 0);
-        let mut resp: Vec<SearchResult> = vec![];
-
-        for search_file in files {
-            let file = self.get_file(&search_file.file_name.as_str());
-            let words = file.content.split(" ").enumerate();
-
-            for (idx, w) in words {
-                let word = w.trim().lines().collect::<Vec<&str>>().join(" ");
-
-                let jer = jaro(word.as_str(), searching) * 100.0;
-                let lensh = normalized_levenshtein(word.as_str(), searching) * 100.0;
-
-                if lensh > 60.0 && jer > 60.0 {
-                    resp.push(SearchResult {
-                        file_name: search_file.file_name.clone(),
-                        file_path: search_file.file_path.clone(),
-                        word,
-                        idx: idx as f64,
-                        lensh,
-                        jer,
-                    });
-                }
-            }
-        }
-
-        resp.sort_by(|a, b| {
-            ((100.0 - a.lensh).abs() + (100.0 - a.jer).abs())
-                .total_cmp(&((100.0 - b.lensh).abs() + (100.0 - b.jer).abs()))
-        });
-        resp
     }
     pub fn scan(&self, path: &str) -> &Self {
         let (dirs, files) = analyze(path);
@@ -232,7 +190,12 @@ impl Db {
 
             // create dict if doesnt exist
             fs::create_dir("dict").ok();
-            for (idx, w) in content.split(" ").filter(|x| re.is_match(x)).enumerate() {
+            for (idx, w) in db_file
+                .content
+                .split(" ")
+                .filter(|x| re.is_match(x))
+                .enumerate()
+            {
                 self.insert_word(&db_file.id, idx, w, &current_path.as_path());
             }
         }
@@ -253,20 +216,20 @@ impl Db {
     fn write_file_stream(&self, file_path: &PathBuf, append: bool) -> File {
         if append {
             let file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(file_path)
-            .unwrap();
+                .append(true)
+                .create(true)
+                .open(file_path)
+                .unwrap();
 
-        file
+            file
         } else {
             let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(file_path)
-            .unwrap();
+                .write(true)
+                .create(true)
+                .open(file_path)
+                .unwrap();
 
-        file
+            file
         }
     }
     fn insert_word(&self, file_idx: &i64, idx: usize, word: &str, path: &Path) -> usize {
@@ -292,5 +255,58 @@ impl Db {
             file.write(parsed_txt.as_bytes())
                 .expect("Err during writing the file");
         }
+    }
+    pub fn search_word(&self, word: &str) -> Vec<DictWord> {
+        let char = &word.chars().take(1).next().unwrap();
+        let path_str = format!("dict/{}", char);
+        let path = Path::new(path_str.as_str());
+
+        let raw_file = fs::read(path).unwrap();
+        let raw_file_content = String::from_utf8(raw_file).unwrap();
+        let file_content: Vec<&str> = raw_file_content.split("\n").collect();
+
+        let mut res: Vec<DictWord> = vec![];
+
+        for line in file_content {
+            if line.len() < 1 {
+                continue;
+            };
+
+            let mut parts = line.split("|");
+            let line_word = parts.next().unwrap();
+            let file_idx = parts.next().unwrap().parse::<i16>().unwrap();
+            let word_idx = parts.next().unwrap().parse::<i32>().unwrap();
+
+            let jer = jaro(word, line_word) * 100.0;
+            let lensh = normalized_levenshtein(word, line_word) * 100.0;
+            let similarity = ((jer + lensh) / 2.0) as f32;
+
+            if lensh > 60.0 && jer > 60.0 {
+                let file = self.get_file_idx((file_idx as i64).clone());
+
+                let raw_content = file.content.split(" ").collect::<Vec<&str>>();
+                let skip = (word_idx - 10) as usize;
+                let take = (word_idx + 10) as usize;
+                let file_content = format!(
+                    "...{}...",
+                    raw_content[skip..take].join(" ").replace("\n", " ")
+                );
+
+                println!("{}, {}, {}", skip, take, file.file_name);
+
+                let resp_word = DictWord {
+                    content: word.to_string(),
+                    file_idx,
+                    word_idx,
+                    similarity,
+                    file_name: file.file_name,
+                    file_path: file.path,
+                    file_content: file_content.to_string(),
+                };
+                res.push(resp_word);
+            }
+        }
+
+        res
     }
 }

@@ -1,9 +1,9 @@
 use std::process::Command;
 
-use iced::widget::{button, column, row, scrollable, text, text_input};
+use iced::widget::{button, column, image, row, scrollable, text, text_input};
 use iced::{Element, Task};
 
-use crate::db::{self, Db, SearchResult};
+use crate::db::{self, DictWord};
 
 #[derive(Debug, Clone)]
 pub enum Tab {
@@ -20,7 +20,7 @@ pub struct App {
     pub scan: String,
     pub search: String,
     pub tab: Tab,
-    pub search_result: Vec<SearchResult>,
+    pub search_result: Vec<DictWord>,
 }
 
 #[derive(Debug, Clone)]
@@ -30,7 +30,7 @@ pub enum Message {
     ScanStr(String),
     SearchStr(String),
     SwitchTab(Tab),
-    Open(SearchResult),
+    Open(DictWord),
 }
 
 impl App {
@@ -42,7 +42,7 @@ impl App {
             }
             Message::Search => {
                 let conn = db::Db::new();
-                let results = conn.search(&self.search);
+                let results = conn.search_word(&self.search);
                 self.search_result = vec![];
 
                 for res in results {
@@ -87,7 +87,8 @@ impl App {
                     .spacing(12),
                     row![
                         text(format!("Files: {}", data.files)),
-                        text(format!("Folders: {}", data.dirs))
+                        text(format!("Folders: {}", data.dirs)),
+                        image("document.svg")
                     ]
                 ]
             }
@@ -103,13 +104,24 @@ impl App {
                 ]
                 .spacing(12);
 
-                for res in self.search_result.iter().clone() {
+                for res in self.search_result.iter() {
+                    let head = format!("{} - {}%", res.file_name.as_str(), res.similarity);
+
+                    let content = column![
+                        row![
+                            button("b").on_press(Message::Open(res.clone())),
+                            column![
+                                text(head.clone()),
+                                text(res.file_path.as_str()),
+                            ]
+                        ],
+                        text(res.file_content.clone())
+                    ];
                     results = results
-                        .push(button(res.file_name.as_str()).on_press(Message::Open(res.clone())));
+                        .push(content);
                 }
 
                 column![scrollable(results)]
-                // results
             }
         };
         let content = column![
