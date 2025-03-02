@@ -1,5 +1,8 @@
+use std::cmp::Ordering;
 use std::process::Command;
 
+use iced::color;
+use iced::widget::shader::wgpu::hal::auxil::db::qualcomm;
 use iced::widget::{button, column, image, row, scrollable, text, text_input};
 use iced::{Element, Task};
 
@@ -42,11 +45,16 @@ impl App {
             }
             Message::Search => {
                 let conn = db::Db::new();
-                let results = conn.search_word(&self.search);
                 self.search_result = vec![];
 
-                for res in results {
-                    self.search_result.push(res);
+                for w in self.search.split(" ") {
+                    let results = conn.search_word(w, 55.0, 55.0);
+
+                    for res in results {
+                        self.search_result.push(res);
+                    }
+                    self.search_result
+                        .sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
                 }
             }
             Message::ScanStr(txt) => {
@@ -102,23 +110,26 @@ impl App {
                     ]
                     .spacing(12),
                 ]
-                .spacing(12);
+                .spacing(16);
 
                 for res in self.search_result.iter() {
-                    let head = format!("{} - {}%", res.file_name.as_str(), res.similarity);
+                    let head = format!("{} - {:.1}%", res.file_name.as_str(), res.similarity);
 
                     let content = column![
                         row![
                             button("b").on_press(Message::Open(res.clone())),
                             column![
                                 text(head.clone()),
-                                text(res.file_path.as_str()),
+                                text(res.file_path.as_str())
+                                    .size(12)
+                                    .color(color!(0x999999))
                             ]
-                        ],
+                        ]
+                        .spacing(4),
                         text(res.file_content.clone())
-                    ];
-                    results = results
-                        .push(content);
+                    ]
+                    .spacing(6);
+                    results = results.push(content);
                 }
 
                 column![scrollable(results)]

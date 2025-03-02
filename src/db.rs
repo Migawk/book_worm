@@ -169,8 +169,7 @@ impl Db {
 
         for dir in dirs {
             self.insert_dir(&dir.name, &dir.path);
-
-            println!("adding DIR :  {}", dir.name);
+            
             self.scan(&dir.path);
         }
         for file in files {
@@ -179,8 +178,7 @@ impl Db {
                 "docx" => docx::get(&file.path).unwrap(),
                 _ => "".to_string(),
             };
-
-            println!("adding FILE: {}", file.file_name);
+            
             self.insert_file(&file.file_name, &file.file_type, &file.path, &content);
 
             let db_file = self.get_file(&file.file_name);
@@ -256,7 +254,7 @@ impl Db {
                 .expect("Err during writing the file");
         }
     }
-    pub fn search_word(&self, word: &str) -> Vec<DictWord> {
+    pub fn search_word(&self, word: &str, lensh_k: f64, jer_k: f64) -> Vec<DictWord> {
         let char = &word.chars().take(1).next().unwrap();
         let path_str = format!("dict/{}", char);
         let path = Path::new(path_str.as_str());
@@ -281,7 +279,7 @@ impl Db {
             let lensh = normalized_levenshtein(word, line_word) * 100.0;
             let similarity = ((jer + lensh) / 2.0) as f32;
 
-            if lensh > 60.0 && jer > 60.0 {
+            if lensh > lensh_k && jer > jer_k {
                 let file = self.get_file_idx((file_idx as i64).clone());
 
                 let raw_content = file.content.split(" ").collect::<Vec<&str>>();
@@ -291,8 +289,6 @@ impl Db {
                     "...{}...",
                     raw_content[skip..take].join(" ").replace("\n", " ")
                 );
-
-                println!("{}, {}, {}", skip, take, file.file_name);
 
                 let resp_word = DictWord {
                     content: word.to_string(),
