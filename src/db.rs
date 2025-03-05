@@ -1,3 +1,4 @@
+use std::env;
 use std::{
     fs::{self, File, OpenOptions},
     io::Write,
@@ -9,9 +10,7 @@ use regex::Regex;
 use sqlite::{Connection, Value};
 use strsim::{jaro, normalized_levenshtein};
 
-use std::env;
-
-use crate::{crawler, docx, pdf};
+use crate::{ai, crawler, docx, pdf};
 use crawler::analyze;
 
 #[derive(Debug)]
@@ -169,7 +168,7 @@ impl Db {
 
         for dir in dirs {
             self.insert_dir(&dir.name, &dir.path);
-            
+
             self.scan(&dir.path);
         }
         for file in files {
@@ -178,7 +177,7 @@ impl Db {
                 "docx" => docx::get(&file.path).unwrap(),
                 _ => "".to_string(),
             };
-            
+
             self.insert_file(&file.file_name, &file.file_type, &file.path, &content);
 
             let db_file = self.get_file(&file.file_name);
@@ -254,12 +253,13 @@ impl Db {
                 .expect("Err during writing the file");
         }
     }
-    pub fn search_word(&self, word: &str, lensh_k: f64, jer_k: f64) -> Vec<DictWord> {
+    pub fn search_word(&self, word: &str, lensh_k: f64, jer_k: f64, use_ai: bool) -> Result<Vec<DictWord>, io::Error> {
         let char = &word.chars().take(1).next().unwrap();
         let path_str = format!("dict/{}", char);
         let path = Path::new(path_str.as_str());
 
-        let raw_file = fs::read(path).unwrap();
+        let raw_file = fs::read(path)?;
+
         let raw_file_content = String::from_utf8(raw_file).unwrap();
         let file_content: Vec<&str> = raw_file_content.split("\n").collect();
 
@@ -279,16 +279,30 @@ impl Db {
             let lensh = normalized_levenshtein(word, line_word) * 100.0;
             let similarity = ((jer + lensh) / 2.0) as f32;
 
-            if lensh > lensh_k && jer > jer_k {
-                let file = self.get_file_idx((file_idx as i64).clone());
+            let common_average = (lensh + jer) / 2.0;
+            let k_average = (lensh_k + jer_k) / 2.0;
 
+            if common_average > k_average {
+                let file = self.get_file_idx((file_idx as i64).clone());
                 let raw_content = file.content.split(" ").collect::<Vec<&str>>();
-                let skip = (word_idx - 10) as usize;
-                let take = (word_idx + 10) as usize;
+                let len_content = raw_content.len();
+                let take_idx = if word_idx + 10 > len_content as i32 {len_content} else {(word_idx + 10) as usize};
+
+                let skip = if word_idx > 11 {word_idx - 10} else { word_idx} as usize;
+                let take = (take_idx) as usize;
+                
                 let file_content = format!(
                     "...{}...",
                     raw_content[skip..take].join(" ").replace("\n", " ")
                 );
+
+                if use_ai {
+                    let ai_resp = ai::check_similarity(word, &file_content);
+                    
+                    if ai_resp < 60.0 {
+                        continue;
+                    }
+                }
 
                 let resp_word = DictWord {
                     content: word.to_string(),
@@ -299,10 +313,11 @@ impl Db {
                     file_path: file.path,
                     file_content: file_content.to_string(),
                 };
+
                 res.push(resp_word);
             }
         }
 
-        res
+        Ok(res)
     }
 }

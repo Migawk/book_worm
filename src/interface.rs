@@ -1,10 +1,9 @@
-use std::cmp::Ordering;
 use std::process::Command;
 
 use iced::color;
-use iced::widget::shader::wgpu::hal::auxil::db::qualcomm;
-use iced::widget::{button, column, image, row, scrollable, text, text_input};
+use iced::widget::{button, checkbox, column, image, row, scrollable, slider, text, text_input};
 use iced::{Element, Task};
+use rfd::FileDialog;
 
 use crate::db::{self, DictWord};
 
@@ -24,16 +23,19 @@ pub struct App {
     pub search: String,
     pub tab: Tab,
     pub search_result: Vec<DictWord>,
+    pub ai: bool,
+    pub similarity: f32,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Scan,
     Search,
-    ScanStr(String),
     SearchStr(String),
     SwitchTab(Tab),
     Open(DictWord),
+    SwitchAI(bool),
+    Slide(f32),
 }
 
 impl App {
@@ -41,6 +43,10 @@ impl App {
         match message {
             Message::Scan => {
                 let conn = db::Db::new();
+
+                let path = FileDialog::new().pick_folder().unwrap();
+                self.scan = String::from(path.to_str().unwrap());
+
                 conn.scan(&self.scan);
             }
             Message::Search => {
@@ -48,17 +54,24 @@ impl App {
                 self.search_result = vec![];
 
                 for w in self.search.split(" ") {
-                    let results = conn.search_word(w, 55.0, 55.0);
+                    let results = conn.search_word(
+                        w,
+                        self.similarity.into(),
+                        self.similarity.into(),
+                        self.ai,
+                    );
 
-                    for res in results {
-                        self.search_result.push(res);
+                    match results {
+                        Ok(results_ok) => {
+                            for res in results_ok {
+                                self.search_result.push(res);
+                            }
+                            self.search_result
+                                .sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
+                        }
+                        Err(_) => {}
                     }
-                    self.search_result
-                        .sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
                 }
-            }
-            Message::ScanStr(txt) => {
-                self.scan = txt.clone();
             }
             Message::SearchStr(txt) => {
                 self.search = txt.clone();
@@ -77,6 +90,10 @@ impl App {
                     .output()
                     .expect("Err during opening file");
             }
+            Message::SwitchAI(v) => self.ai = v,
+            Message::Slide(v) => {
+                self.similarity = v;
+            }
         }
         Task::none()
     }
@@ -86,13 +103,11 @@ impl App {
             Tab::Scanning => {
                 let data = db::Db::new();
 
+                let scanning_path = format!("Scanning path path is: {}", self.scan);
+
                 column![
                     text("Scan the path to library"),
-                    row![
-                        text_input("Scan directory", &self.scan).on_input(Message::ScanStr),
-                        button("Scan").on_press(Message::Scan),
-                    ]
-                    .spacing(12),
+                    row![text(scanning_path), button("Scan").on_press(Message::Scan),].spacing(12),
                     row![
                         text(format!("Files: {}", data.files)),
                         text(format!("Folders: {}", data.dirs)),
@@ -132,7 +147,19 @@ impl App {
                     results = results.push(content);
                 }
 
-                column![scrollable(results)]
+                let current_similarity = format!("{:.0}%", self.similarity);
+                column![
+                    row![
+                        checkbox("AI", self.ai).on_toggle(Message::SwitchAI),
+                        row![
+                            text(current_similarity),
+                            slider(55.0..=100.0, self.similarity, Message::Slide)
+                        ]
+                        .spacing(2)
+                    ]
+                    .spacing(12),
+                    scrollable(results)
+                ]
             }
         };
         let content = column![
@@ -140,7 +167,7 @@ impl App {
                 button("Scanning").on_press(Message::SwitchTab(Tab::Scanning)),
                 button("Searching").on_press(Message::SwitchTab(Tab::Searching))
             ],
-            row![tab].spacing(12)
+            row![tab].spacing(12),
         ]
         .spacing(12);
 
