@@ -1,7 +1,7 @@
 use std::process::Command;
 
 use iced::color;
-use iced::widget::{button, checkbox, column, image, row, scrollable, slider, text, text_input};
+use iced::widget::{button, column, row, scrollable, slider, text, text_input};
 use iced::{Element, Task};
 use rfd::FileDialog;
 
@@ -23,7 +23,6 @@ pub struct App {
     pub search: String,
     pub tab: Tab,
     pub search_result: Vec<DictWord>,
-    pub ai: bool,
     pub similarity: f32,
 }
 
@@ -34,7 +33,6 @@ pub enum Message {
     SearchStr(String),
     SwitchTab(Tab),
     Open(DictWord),
-    SwitchAI(bool),
     Slide(f32),
 }
 
@@ -54,12 +52,8 @@ impl App {
                 self.search_result = vec![];
 
                 for w in self.search.split(" ") {
-                    let results = conn.search_word(
-                        w,
-                        self.similarity.into(),
-                        self.similarity.into(),
-                        self.ai,
-                    );
+                    let results =
+                        conn.search_word(w, self.similarity.into(), self.similarity.into());
 
                     match results {
                         Ok(results_ok) => {
@@ -90,7 +84,6 @@ impl App {
                     .output()
                     .expect("Err during opening file");
             }
-            Message::SwitchAI(v) => self.ai = v,
             Message::Slide(v) => {
                 self.similarity = v;
             }
@@ -107,25 +100,15 @@ impl App {
 
                 column![
                     text("Scan the path to library"),
-                    row![text(scanning_path), button("Scan").on_press(Message::Scan),].spacing(12),
+                    row![button("Scan").on_press(Message::Scan), text(scanning_path)].spacing(12),
                     row![
                         text(format!("Files: {}", data.files)),
-                        text(format!("Folders: {}", data.dirs)),
-                        image("document.svg")
+                        text(format!("Folders: {}", data.dirs))
                     ]
                 ]
             }
             Tab::Searching => {
-                let mut results = column![
-                    text("Search"),
-                    row![
-                        text_input("Search by word or phrase", &self.search)
-                            .on_input(Message::SearchStr),
-                        button("Search").on_press(Message::Search)
-                    ]
-                    .spacing(12),
-                ]
-                .spacing(16);
+                let mut results = column![].spacing(16);
 
                 for res in self.search_result.iter() {
                     let head = format!("{} - {:.1}%", res.file_name.as_str(), res.similarity);
@@ -147,19 +130,22 @@ impl App {
                     results = results.push(content);
                 }
 
-                let current_similarity = format!("{:.0}%", self.similarity);
+                let current_similarity = format!("Accurate: {:.0}%", self.similarity);
                 column![
-                    row![
-                        checkbox("AI", self.ai).on_toggle(Message::SwitchAI),
-                        row![
-                            text(current_similarity),
-                            slider(55.0..=100.0, self.similarity, Message::Slide)
-                        ]
-                        .spacing(2)
+                    row![row![row![
+                        text_input("Search by word or phrase", &self.search)
+                            .on_input(Message::SearchStr),
+                        button("Search").on_press(Message::Search)
                     ]
+                    .spacing(12),]
+                    .spacing(2)]
                     .spacing(12),
+                    row![
+                        text(current_similarity),
+                        slider(55.0..=100.0, self.similarity, Message::Slide),
+                    ].spacing(6),
                     scrollable(results)
-                ]
+                ].spacing(6)
             }
         };
         let content = column![

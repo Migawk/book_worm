@@ -3,7 +3,6 @@ mod db;
 mod docx;
 mod interface;
 mod pdf;
-mod ai;
 
 use std::env;
 
@@ -18,7 +17,6 @@ fn main() -> iced::Result {
         search: String::new(),
         tab: Tab::Scanning,
         search_result: vec![],
-        ai: false,
         similarity: 55.0
     };
 

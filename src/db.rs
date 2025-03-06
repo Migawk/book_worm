@@ -10,7 +10,7 @@ use regex::Regex;
 use sqlite::{Connection, Value};
 use strsim::{jaro, normalized_levenshtein};
 
-use crate::{ai, crawler, docx, pdf};
+use crate::{crawler, docx, pdf};
 use crawler::analyze;
 
 #[derive(Debug)]
@@ -253,7 +253,12 @@ impl Db {
                 .expect("Err during writing the file");
         }
     }
-    pub fn search_word(&self, word: &str, lensh_k: f64, jer_k: f64, use_ai: bool) -> Result<Vec<DictWord>, io::Error> {
+    pub fn search_word(
+        &self,
+        word: &str,
+        lensh_k: f64,
+        jer_k: f64,
+    ) -> Result<Vec<DictWord>, io::Error> {
         let char = &word.chars().take(1).next().unwrap();
         let path_str = format!("dict/{}", char);
         let path = Path::new(path_str.as_str());
@@ -286,23 +291,23 @@ impl Db {
                 let file = self.get_file_idx((file_idx as i64).clone());
                 let raw_content = file.content.split(" ").collect::<Vec<&str>>();
                 let len_content = raw_content.len();
-                let take_idx = if word_idx + 10 > len_content as i32 {len_content} else {(word_idx + 10) as usize};
+                let take_idx = if word_idx + 10 > len_content as i32 {
+                    len_content
+                } else {
+                    (word_idx + 10) as usize
+                };
 
-                let skip = if word_idx > 11 {word_idx - 10} else { word_idx} as usize;
+                let skip = if word_idx > 11 {
+                    word_idx - 10
+                } else {
+                    word_idx
+                } as usize;
                 let take = (take_idx) as usize;
-                
+
                 let file_content = format!(
                     "...{}...",
                     raw_content[skip..take].join(" ").replace("\n", " ")
                 );
-
-                if use_ai {
-                    let ai_resp = ai::check_similarity(word, &file_content);
-                    
-                    if ai_resp < 60.0 {
-                        continue;
-                    }
-                }
 
                 let resp_word = DictWord {
                     content: word.to_string(),
